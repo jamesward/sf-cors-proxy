@@ -4,7 +4,7 @@
 @REM JAVA_HOME - location of a JDK home dir (optional if java on path)
 @REM CFG_OPTS  - JVM options (optional)
 @REM Configuration:
-@REM activatorconfig.txt found in the ACTIVATOR_HOME.
+@REM activatorconfig.txt found in the ACTIVATOR_HOME or ACTIVATOR_HOME/ACTIVATOR_VERSION
 @setlocal enabledelayedexpansion
 
 @echo off
@@ -13,42 +13,60 @@ set "var1=%~1"
 if defined var1 (
   if "%var1%"=="help" (
     echo.
-    echo Usage activator [command]
+    echo Usage activator [options] [command]
     echo.
     echo Commands:
-    echo ui               Start the Activator UI
+    echo ui                 Start the Activator UI
     echo new [name] [template-id]  Create a new project with [name] using template [template-id]
-    echo list-templates   Print all available template names
-    echo help             Print this message
+    echo list-templates     Print all available template names
+    echo help               Print this message
+    echo.
+    echo Options:
+    echo -jvm-debug [port]  Turn on JVM debugging, open at the given port.  Defaults to 9999 if no port given.
     echo.
     echo Environment variables ^(read from context^):
-    echo JAVA_OPTS        Environment variable, if unset uses ""
-    echo SBT_OPTS         Environment variable, if unset uses ""
-    echo ACTIVATOR_OPTS   Environment variable, if unset uses ""
+    echo JAVA_OPTS          Environment variable, if unset uses ""
+    echo SBT_OPTS           Environment variable, if unset uses ""
+    echo ACTIVATOR_OPTS     Environment variable, if unset uses ""
     echo.
     goto :end
   )
 )
 
-if "%ACTIVATOR_HOME%"=="" set "ACTIVATOR_HOME=%~dp0"
+if "%ACTIVATOR_HOME%"=="" (
+	set "ACTIVATOR_HOME=%~dp0"
+	@REM remove trailing "\" from path
+	set ACTIVATOR_HOME=!ACTIVATOR_HOME:~0,-1!
+)
 
 set ERROR_CODE=0
-set APP_VERSION=1.1.3
+set APP_VERSION=1.2.2
 set ACTIVATOR_LAUNCH_JAR=activator-launch-%APP_VERSION%.jar
 
 rem Detect if we were double clicked, although theoretically A user could
 rem manually run cmd /c
 for %%x in (%cmdcmdline%) do if %%~x==/c set DOUBLECLICKED=1
 
-rem FIRST we load the config file of extra options.
-set "CFG_FILE=%UserProfile%\.activator\%APP_VERSION%\activatorconfig.txt"
+rem FIRST we load a config file of extra options (if there is one)
+set "CFG_FILE_HOME=%UserProfile%\.activator\activatorconfig.txt"
+set "CFG_FILE_VERSION=%UserProfile%\.activator\%APP_VERSION%\activatorconfig.txt"
 set CFG_OPTS=
-if exist %CFG_FILE% (
-  FOR /F "tokens=* eol=# usebackq delims=" %%i IN ("%CFG_FILE%") DO (
+if exist %CFG_FILE_VERSION% (
+  FOR /F "tokens=* eol=# usebackq delims=" %%i IN ("%CFG_FILE_VERSION%") DO (
     set DO_NOT_REUSE_ME=%%i
     rem ZOMG (Part #2) WE use !! here to delay the expansion of
     rem CFG_OPTS, otherwise it remains "" for this loop.
     set CFG_OPTS=!CFG_OPTS! !DO_NOT_REUSE_ME!
+  )
+)
+if "%CFG_OPTS%"=="" (
+  if exist %CFG_FILE_HOME% (
+    FOR /F "tokens=* eol=# usebackq delims=" %%i IN ("%CFG_FILE_HOME%") DO (
+      set DO_NOT_REUSE_ME=%%i
+      rem ZOMG (Part #2) WE use !! here to delay the expansion of
+      rem CFG_OPTS, otherwise it remains "" for this loop.
+      set CFG_OPTS=!CFG_OPTS! !DO_NOT_REUSE_ME!
+    )
   )
 )
 
@@ -117,25 +135,59 @@ for /f "delims=. tokens=1-3" %%v in ("%JAVA_VERSION%") do (
     set MINOR=%%w
     set BUILD=%%x
 
-    set PERM_SIZE=
-    if "%MINOR%" LSS "8" (
-      set PERM_SIZE=-XX:PermSize=64M -XX:MaxPermSize=256M
+    set META_SIZE=-XX:MetaspaceSize=64M -XX:MaxMetaspaceSize=256M
+    if "!MINOR!" LSS "8" (
+      set META_SIZE=-XX:PermSize=64M -XX:MaxPermSize=256M
     )
 
-    set MEM_OPTS=%PERM_SIZE%
+    set MEM_OPTS=!META_SIZE!
  )
 
 rem We use the value of the JAVA_OPTS environment variable if defined, rather than the config.
 set _JAVA_OPTS=%JAVA_OPTS%
 if "%_JAVA_OPTS%"=="" set _JAVA_OPTS=%CFG_OPTS%
 
+set DEBUG_OPTS=
+
+rem Loop through the arguments, building remaining args in args variable
+set args=
+:argsloop
+if not "%~1"=="" (
+  if "%~1"=="-jvm-debug" (
+    if not "%~2"=="" (
+      rem This piece of magic somehow checks that an argument is a number
+      for /F "delims=0123456789" %%i in ("%~2") do (
+        set var="%%i"
+      )
+      if defined var (
+        rem Not a number, assume no argument given and default to 9999
+        set JPDA_PORT=9999
+      ) else (
+        rem Port was given, shift arguments
+        set JPDA_PORT=%~2
+        shift
+      )
+    ) else (
+      set JPDA_PORT=9999
+    )
+    shift
+
+    set DEBUG_OPTS=-Xdebug -Xrunjdwp:transport=dt_socket,server=y,suspend=y,address=!JPDA_PORT!
+    goto argsloop
+  )
+  rem else
+  set "args=%args% "%~1""
+  shift
+  goto argsloop
+)
+
 :run
 
-if "%*"=="" (
+if "!args!"=="" (
   if defined DOUBLECLICKED (
     set CMDS="ui"
-  ) else set CMDS=%*
-) else set CMDS=%*
+  ) else set CMDS=!args!
+) else set CMDS=!args!
 
 rem We add a / in front, so we get file:///C: instead of file://C:
 rem Java considers the later a UNC path.
@@ -144,7 +196,11 @@ rem We don't even bother with UNC paths.
 set JAVA_FRIENDLY_HOME_1=/!ACTIVATOR_HOME:\=/!
 set JAVA_FRIENDLY_HOME=/!JAVA_FRIENDLY_HOME_1: =%%20!
 
-"%_JAVACMD%" %MEM_OPTS% %ACTIVATOR_OPTS% %SBT_OPTS% %_JAVA_OPTS% "-Dactivator.home=%JAVA_FRIENDLY_HOME%" -jar "%ACTIVATOR_HOME%\%ACTIVATOR_LAUNCH_JAR%" %CMDS%
+rem Checks if the command contains spaces to know if it should be wrapped in quotes or not
+set NON_SPACED_CMD=%_JAVACMD: =%
+if "%_JAVACMD%"=="%NON_SPACED_CMD%" %_JAVACMD% %DEBUG_OPTS% %MEM_OPTS% %ACTIVATOR_OPTS% %SBT_OPTS% %_JAVA_OPTS% "-Dactivator.home=%JAVA_FRIENDLY_HOME%" -jar "%ACTIVATOR_HOME%\%ACTIVATOR_LAUNCH_JAR%" %CMDS%
+if NOT "%_JAVACMD%"=="%NON_SPACED_CMD%" "%_JAVACMD%" %DEBUG_OPTS% %MEM_OPTS% %ACTIVATOR_OPTS% %SBT_OPTS% %_JAVA_OPTS% "-Dactivator.home=%JAVA_FRIENDLY_HOME%" -jar "%ACTIVATOR_HOME%\%ACTIVATOR_LAUNCH_JAR%" %CMDS%
+
 if ERRORLEVEL 1 goto error
 goto end
 
