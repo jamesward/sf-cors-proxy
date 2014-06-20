@@ -2,6 +2,8 @@ name := "sf-cors-proxy"
 
 version := "1.0-SNAPSHOT"
 
-libraryDependencies += play.Keys.cache
+scalaVersion := "2.11.1"
 
-play.Project.playScalaSettings
+libraryDependencies ++= Seq(cache, ws)
+
+lazy val root = (project in file(".")).enablePlugins(PlayScala)

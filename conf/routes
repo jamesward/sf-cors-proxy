@@ -2,6 +2,6 @@
 # This file defines all application routes (Higher priority routes first)
 # ~~~~
 
-GET         /*path                           controllers.Application.get(path)
-POST        /*path                           controllers.Application.post(path)
+GET         /*path                           controllers.Application.proxy(path)
+POST        /*path                           controllers.Application.proxy(path)
 OPTIONS     /*path                           controllers.Application.options(path)
