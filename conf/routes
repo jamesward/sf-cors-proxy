@@ -4,4 +4,5 @@
 
 GET         /*path                           controllers.Application.proxy(path)
 POST        /*path                           controllers.Application.proxy(path)
+OPTIONS     /                                controllers.Application.options(path="")
 OPTIONS     /*path                           controllers.Application.options(path)
