@@ -2,6 +2,8 @@
 # This file defines all application routes (Higher priority routes first)
 # ~~~~
 
+GET         /services/oauth2/*path           controllers.Application.loginProxy(path)
+POST        /services/oauth2/*path           controllers.Application.loginProxy(path)
 GET         /*path                           controllers.Application.proxy(path)
 POST        /*path                           controllers.Application.proxy(path)
 OPTIONS     /                                controllers.Application.options(path="")

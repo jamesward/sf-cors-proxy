@@ -10,8 +10,7 @@ import play.api.Play.current
 
 object Application extends Controller {
 
-  def proxy(path: String) = RequestWithInstance.async { request =>
-    val url = s"https://${request.instance}${request.uri}"
+  private def proxyRequestResponse(request: Request[AnyContent], url: String): Future[Result] = {
     val requestHeaders = request.headers.toSimpleMap.toSeq
     val ws = WS.url(url).withMethod(request.method).withHeaders(requestHeaders: _*)
     val wsWithBody = request.body match {
@@ -32,6 +31,18 @@ object Application extends Controller {
     wsWithBody.stream().map { case (response, enumerator) =>
       val responseHeaders = response.headers.mapValues(_.headOption.getOrElse("")).toSeq
       Status(response.status).chunked(enumerator).withHeaders(responseHeaders: _*)
+    }
+  }
+
+  def proxy(path: String) = RequestWithInstance.async { request =>
+    val url = s"https://${request.instance}${request.uri}"
+    proxyRequestResponse(request, url)
+  }
+
+  def loginProxy(path: String) = CorsAction {
+    Action.async { request =>
+      val url = s"https://login.salesforce.com${request.uri}"
+      proxyRequestResponse(request, url)
     }
   }
 
