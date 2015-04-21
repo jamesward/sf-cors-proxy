@@ -23,6 +23,15 @@ class ApplicationSpec extends PlaySpec with Results with OneServerPerSuite {
     }
   }
 
+  "bad query" must {
+    "fail correctly" in {
+      val response = await(ws("/services/data/v30.0/query/?FOO").get())
+      response.status mustEqual BAD_REQUEST
+      response.json.as[Seq[JsValue]].headOption.flatMap(jv => (jv \ "errorCode").asOpt[String]) mustEqual Some("MALFORMED_QUERY")
+      response.header(HeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN) mustBe 'defined
+    }
+  }
+
   "create contact with required fields" must {
     "create a contact" in {
       val json = Json.obj("LastName" -> "Foo")
@@ -39,6 +48,7 @@ class ApplicationSpec extends PlaySpec with Results with OneServerPerSuite {
       val response = await(ws("/services/data/v30.0/sobjects/Contact/").post(json))
       response.status mustEqual BAD_REQUEST
       response.json.as[Seq[JsValue]].headOption.flatMap(jv => (jv \ "errorCode").asOpt[String]) mustEqual Some("REQUIRED_FIELD_MISSING")
+      response.header(HeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN) mustBe 'defined
     }
   }
 
