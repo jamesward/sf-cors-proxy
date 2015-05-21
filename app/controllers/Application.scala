@@ -1,5 +1,6 @@
 package controllers
 
+import play.api.libs.Codecs
 import play.api.mvc._
 import scala.concurrent.Future
 import scala.concurrent.ExecutionContext.Implicits.global
@@ -76,12 +77,12 @@ object RequestWithInstance extends ActionBuilder[RequestWithInstance] {
       val url = s"https://login.salesforce.com/services/oauth2/userinfo?oauth_token=$token"
       WS.url(url).get().map { response =>
         val instance = (response.json \ "profile").as[String].replace("https://", "").takeWhile(_ != '/')
-        Cache.set(auth, instance)
+        Cache.set(Codecs.sha1(auth), instance)
         instance
       }
     }
 
-    def tryCache(auth: String): Future[String] = Cache.getAs[String](auth).fold(cacheMiss(auth))(Future.successful)
+    def tryCache(auth: String): Future[String] = Cache.getAs[String](Codecs.sha1(auth)).fold(cacheMiss(auth))(Future.successful)
 
     def makeReq(auth: String): Future[Result] = {
       tryCache(auth).flatMap { instance =>
