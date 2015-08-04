@@ -42,8 +42,16 @@ object Application extends Controller {
 
   def loginProxy(path: String) = CorsAction {
     Action.async { request =>
-      val url = s"https://login.salesforce.com${request.uri}"
-      proxyRequestResponse(request, url)
+      val prodUrl = s"https://login.salesforce.com${request.uri}"
+      proxyRequestResponse(request, prodUrl).flatMap { result =>
+        result.header.status match {
+          case NOT_FOUND =>
+            val sandboxUrl = s"https://test.salesforce.com${request.uri}"
+            proxyRequestResponse(request, sandboxUrl)
+          case _ =>
+            Future.successful(result)
+        }
+      }
     }
   }
 
@@ -73,13 +81,21 @@ object RequestWithInstance extends ActionBuilder[RequestWithInstance] {
   def invokeBlock[A](request: Request[A], block: (RequestWithInstance[A]) => Future[Result]): Future[Result] = {
 
     def cacheMiss(auth: String): Future[String] = {
-      val token = auth.replace("Bearer ", "")
-      val url = s"https://login.salesforce.com/services/oauth2/userinfo?oauth_token=$token"
-      WS.url(url).get().map { response =>
-        val instance = (response.json \ "profile").as[String].replace("https://", "").takeWhile(_ != '/')
-        Cache.set(Codecs.sha1(auth), instance)
-        instance
+
+      def userinfo(url: String): Future[String] = {
+        WS.url(url).get().map { response =>
+          val instance = (response.json \ "profile").as[String].replace("https://", "").takeWhile(_ != '/')
+          Cache.set(Codecs.sha1(auth), instance)
+          instance
+        }
       }
+
+      val token = auth.replace("Bearer ", "")
+
+      val prodUrl = s"https://login.salesforce.com/services/oauth2/userinfo?oauth_token=$token"
+      val sandboxUrl = s"https://test.salesforce.com/services/oauth2/userinfo?oauth_token=$token"
+
+      userinfo(prodUrl).fallbackTo(userinfo(sandboxUrl))
     }
 
     def tryCache(auth: String): Future[String] = Cache.getAs[String](Codecs.sha1(auth)).fold(cacheMiss(auth))(Future.successful)

@@ -14,6 +14,19 @@ class ApplicationSpec extends PlaySpec with Results with OneServerPerSuite {
     WS.url(url).withHeaders(HeaderNames.AUTHORIZATION -> s"Bearer ${maybeForceToken.get}")
   }
 
+  "userinfo" must {
+    "work with valid credentials" in {
+      val maybeForceToken = sys.env.get("FORCE_TOKEN")
+      assume(maybeForceToken.isDefined)
+      val response = await(WS.url(s"http://localhost:$port/services/oauth2/userinfo?oauth_token=${maybeForceToken.get}").get())
+      response.status mustEqual OK
+    }
+    "not work with invalid credentials" in {
+      val response = await(WS.url(s"http://localhost:$port/services/oauth2/userinfo?oauth_token=asdf").get())
+      response.status mustEqual FORBIDDEN
+    }
+  }
+
   "query contacts" must {
     "return the contacts" in {
       val response = await(ws("/services/data/v30.0/query/?q=SELECT+name+from+Contact").get())
