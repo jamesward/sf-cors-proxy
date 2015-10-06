@@ -65,4 +65,12 @@ class ApplicationSpec extends PlaySpec with Results with OneServerPerSuite {
     }
   }
 
+  "Apex REST" must {
+    "work" in {
+      val response = await(ws("/services/apexrest/Contacts").get())
+      response.status mustEqual OK
+      response.json.as[Seq[JsValue]].headOption.flatMap(_.\("Id").asOpt[String]).filter(_.nonEmpty) mustBe 'defined
+    }
+  }
+
 }

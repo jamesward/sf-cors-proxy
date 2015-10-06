@@ -1,0 +1,12 @@
+{
+  "name": "Salesforce CORS Proxy",
+  "description": "A Reactive CORS Proxy for Salesforce",
+  "repository": "https://github.com/jamesward/sf-cors-proxy",
+  "keywords": ["salesforce", "cors", "proxy"],
+  "env": {
+    "APPLICATION_SECRET": {
+      "description": "Used as an encryption key",
+      "generator": "secret"
+    }
+  }
+}
