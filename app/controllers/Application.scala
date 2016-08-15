@@ -1,19 +1,64 @@
 package controllers
 
+import javax.inject.Inject
+
+import akka.util.ByteString
 import play.api.libs.Codecs
 import play.api.mvc._
-import scala.concurrent.Future
-import scala.concurrent.ExecutionContext.Implicits.global
-import play.api.libs.ws.WS
-import play.api.cache.Cache
-import play.api.http.HeaderNames
-import play.api.Play.current
 
-object Application extends Controller {
+import scala.concurrent.{ExecutionContext, Future}
+import play.api.libs.ws.WSClient
+import play.api.cache.CacheApi
+import play.api.http.HeaderNames
+
+class Application @Inject() (wsClient: WSClient, cache: CacheApi) (implicit ec: ExecutionContext) extends Controller {
+
+  // Adds the CORS Header
+  object CorsAction extends ActionBuilder[Request] {
+    override def invokeBlock[A](request: Request[A], block: (Request[A]) => Future[Result]): Future[Result] = {
+      block(request).map(result => result.withHeaders(HeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN -> "*"))
+    }
+  }
+
+  class RequestWithInstance[A](val instance: String, request: Request[A]) extends WrappedRequest[A](request)
+
+  object InstanceAction extends ActionBuilder[RequestWithInstance] with ActionTransformer[Request, RequestWithInstance] {
+
+    override protected def transform[A](request: Request[A]): Future[RequestWithInstance[A]] = {
+
+      def cacheMiss(auth: String): Future[String] = {
+
+        def userinfo(url: String): Future[String] = {
+          wsClient.url(url).get().map { response =>
+            val instance = (response.json \ "profile").as[String].replace("https://", "").takeWhile(_ != '/')
+            cache.set(Codecs.sha1(auth), instance)
+            instance
+          }
+        }
+
+        val token = auth.replace("Bearer ", "")
+
+        val prodUrl = s"https://login.salesforce.com/services/oauth2/userinfo?oauth_token=$token"
+        val sandboxUrl = s"https://test.salesforce.com/services/oauth2/userinfo?oauth_token=$token"
+
+        userinfo(prodUrl).fallbackTo(userinfo(sandboxUrl))
+      }
+
+      def tryCache(auth: String): Future[String] = cache.get[String](Codecs.sha1(auth)).fold(cacheMiss(auth))(Future.successful)
+
+      def makeReq(auth: String): Future[RequestWithInstance[A]] = {
+        tryCache(auth).map { instance =>
+         new RequestWithInstance[A](instance, request)
+        }
+      }
+
+      request.headers.get(HeaderNames.AUTHORIZATION).fold(Future.failed[RequestWithInstance[A]](new Exception("Authorization Header Not Found")))(makeReq)
+    }
+  }
 
   private def proxyRequestResponse(request: Request[AnyContent], url: String): Future[Result] = {
     val requestHeaders = request.headers.toSimpleMap.toSeq
-    val ws = WS.url(url).withMethod(request.method).withHeaders(requestHeaders: _*)
+    val ws = wsClient.url(url).withMethod(request.method).withHeaders(requestHeaders: _*)
     val wsWithBody = request.body match {
       case c: AnyContentAsFormUrlEncoded =>
         ws.withBody(c.data)
@@ -24,90 +69,38 @@ object Application extends Controller {
       case c: AnyContentAsText =>
         ws.withBody(c.txt)
       case c: AnyContentAsRaw =>
-        ws.withBody(c.raw.asBytes().getOrElse(Array.empty))
+        ws.withBody(c.raw.asBytes().getOrElse(ByteString.empty))
       case _ =>
         ws
     }
 
-    wsWithBody.stream().map { case (response, enumerator) =>
-      val responseHeaders = response.headers.mapValues(_.headOption.getOrElse("")).toSeq
-      Status(response.status).chunked(enumerator).withHeaders(responseHeaders: _*)
+    wsWithBody.stream().map { streamedResponse =>
+      val responseHeaders = streamedResponse.headers.headers.filterKeys(_ != HeaderNames.CONTENT_TYPE).mapValues(_.headOption.getOrElse("")).toSeq
+      val contentType = streamedResponse.headers.headers.getOrElse(HeaderNames.CONTENT_TYPE, Seq("application/octet-stream")).head
+      Status(streamedResponse.headers.status).chunked(streamedResponse.body).withHeaders(responseHeaders:_*).as(contentType)
     }
   }
 
-  def proxy(path: String) = RequestWithInstance.async { request =>
+  def proxy(path: String) = (CorsAction andThen InstanceAction).async { request =>
     val url = s"https://${request.instance}${request.uri}"
     proxyRequestResponse(request, url)
   }
 
-  def loginProxy(path: String) = CorsAction {
-    Action.async { request =>
-      val prodUrl = s"https://login.salesforce.com${request.uri}"
-      proxyRequestResponse(request, prodUrl).flatMap { result =>
-        result.header.status match {
-          case NOT_FOUND =>
-            val sandboxUrl = s"https://test.salesforce.com${request.uri}"
-            proxyRequestResponse(request, sandboxUrl)
-          case _ =>
-            Future.successful(result)
-        }
+  def loginProxy(path: String) = CorsAction.async { request =>
+    val prodUrl = s"https://login.salesforce.com${request.uri}"
+    proxyRequestResponse(request, prodUrl).flatMap { result =>
+      result.header.status match {
+        case NOT_FOUND =>
+          val sandboxUrl = s"https://test.salesforce.com${request.uri}"
+          proxyRequestResponse(request, sandboxUrl)
+        case _ =>
+          Future.successful(result)
       }
     }
   }
 
   def options(path: String) = CorsAction {
-    Action { request =>
-      Ok.withHeaders(ACCESS_CONTROL_ALLOW_HEADERS -> Seq(AUTHORIZATION, CONTENT_TYPE, "Target-URL").mkString(","))
-    }
+    Ok.withHeaders(ACCESS_CONTROL_ALLOW_HEADERS -> Seq(AUTHORIZATION, CONTENT_TYPE, "Target-URL").mkString(","))
   }
 
-}
-
-// Adds the CORS Header
-case class CorsAction[A](action: Action[A]) extends Action[A] {
-
-  def apply(request: Request[A]): Future[Result] = {
-    action(request).map(result => result.withHeaders(HeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN -> "*"))
-  }
-
-  lazy val parser = action.parser
-}
-
-
-class RequestWithInstance[A](val instance: String, request: Request[A]) extends WrappedRequest[A](request)
-
-// Figures out the Salesforce Instance to make the request to
-object RequestWithInstance extends ActionBuilder[RequestWithInstance] {
-  def invokeBlock[A](request: Request[A], block: (RequestWithInstance[A]) => Future[Result]): Future[Result] = {
-
-    def cacheMiss(auth: String): Future[String] = {
-
-      def userinfo(url: String): Future[String] = {
-        WS.url(url).get().map { response =>
-          val instance = (response.json \ "profile").as[String].replace("https://", "").takeWhile(_ != '/')
-          Cache.set(Codecs.sha1(auth), instance)
-          instance
-        }
-      }
-
-      val token = auth.replace("Bearer ", "")
-
-      val prodUrl = s"https://login.salesforce.com/services/oauth2/userinfo?oauth_token=$token"
-      val sandboxUrl = s"https://test.salesforce.com/services/oauth2/userinfo?oauth_token=$token"
-
-      userinfo(prodUrl).fallbackTo(userinfo(sandboxUrl))
-    }
-
-    def tryCache(auth: String): Future[String] = Cache.getAs[String](Codecs.sha1(auth)).fold(cacheMiss(auth))(Future.successful)
-
-    def makeReq(auth: String): Future[Result] = {
-      tryCache(auth).flatMap { instance =>
-        block(new RequestWithInstance[A](instance, request))
-      }
-    }
-
-    request.headers.get(HeaderNames.AUTHORIZATION).fold(Future.successful(Results.Unauthorized("Authorization Header Not Found")))(makeReq)
-  }
-
-  override protected def composeAction[A](action: Action[A]): Action[A] = new CorsAction(action)
 }

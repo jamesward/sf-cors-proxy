@@ -1,14 +1,12 @@
 name := "sf-cors-proxy"
 
-version := "1.0-SNAPSHOT"
-
-scalaVersion := "2.11.1"
+scalaVersion := "2.11.8"
 
 libraryDependencies ++= Seq(
   cache,
   ws,
   filters,
-  "org.scalatestplus" %% "play" % "1.1.0" % "test"
+  "org.scalatestplus.play" %% "scalatestplus-play" % "1.5.1"
 )
 
 lazy val root = (project in file(".")).enablePlugins(PlayScala)
