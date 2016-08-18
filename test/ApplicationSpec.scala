@@ -16,6 +16,28 @@ class ApplicationSpec extends PlaySpec with Results with OneServerPerSuite {
     wsClient.url(url).withHeaders(HeaderNames.AUTHORIZATION -> s"Bearer ${maybeForceToken.get}")
   }
 
+  "token" must {
+    "work with valid credentials" in {
+      for {
+        username <- sys.env.get("FORCE_USERNAME")
+        password <- sys.env.get("FORCE_PASSWORD")
+        clientId <- sys.env.get("FORCE_CLIENT_ID")
+        clientSecret <- sys.env.get("FORCE_CLIENT_SECRET")
+      } yield {
+        val body = Map(
+          "grant_type" -> "password",
+          "client_id" -> clientId,
+          "client_secret" -> clientSecret,
+          "username" -> username,
+          "password" -> password
+        ).mapValues(Seq(_))
+
+        val response = await(wsClient.url(s"http://localhost:$port/services/oauth2/token").post(body))
+        response.status mustEqual OK
+      }
+    }
+  }
+
   "userinfo" must {
     "work with valid credentials" in {
       val maybeForceToken = sys.env.get("FORCE_TOKEN")
@@ -26,6 +48,15 @@ class ApplicationSpec extends PlaySpec with Results with OneServerPerSuite {
     "not work with invalid credentials" in {
       val response = await(wsClient.url(s"http://localhost:$port/services/oauth2/userinfo?oauth_token=asdf").get())
       response.status mustEqual FORBIDDEN
+    }
+  }
+
+  "API" must {
+    "work" in {
+      val response = await(ws("/services/data").get())
+      response.status mustEqual OK
+      response.header(HeaderNames.ACCESS_CONTROL_ALLOW_ORIGIN) mustBe 'defined
+      response.header(HeaderNames.CONTENT_TYPE) mustEqual Some("application/json;charset=UTF-8")
     }
   }
 

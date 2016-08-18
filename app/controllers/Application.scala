@@ -90,7 +90,7 @@ class Application @Inject() (wsClient: WSClient, cache: CacheApi) (implicit ec: 
     val prodUrl = s"https://login.salesforce.com${request.uri}"
     proxyRequestResponse(request, prodUrl).flatMap { result =>
       result.header.status match {
-        case NOT_FOUND =>
+        case NOT_FOUND | BAD_REQUEST =>
           val sandboxUrl = s"https://test.salesforce.com${request.uri}"
           proxyRequestResponse(request, sandboxUrl)
         case _ =>
