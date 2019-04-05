@@ -16,7 +16,13 @@ class Application @Inject() (wsClient: WSClient, cache: CacheApi) (implicit ec: 
   // Adds the CORS Header
   object CorsAction extends ActionBuilder[Request] {
     override def invokeBlock[A](request: Request[A], block: Request[A] => Future[Result]): Future[Result] = {
-      block(request).map(result => result.withHeaders(ACCESS_CONTROL_ALLOW_ORIGIN -> "*", ACCESS_CONTROL_ALLOW_HEADERS -> "*"))
+      block(request).map { result =>
+        result.withHeaders(
+          ACCESS_CONTROL_ALLOW_ORIGIN -> "*",
+          ACCESS_CONTROL_ALLOW_HEADERS -> "*",
+          ACCESS_CONTROL_ALLOW_METHODS -> "*"
+        )
+      }
     }
   }
 
@@ -100,7 +106,10 @@ class Application @Inject() (wsClient: WSClient, cache: CacheApi) (implicit ec: 
   }
 
   def options(path: String) = CorsAction {
-    Ok.withHeaders(ACCESS_CONTROL_ALLOW_HEADERS -> "*")
+    Ok.withHeaders(
+      ACCESS_CONTROL_ALLOW_HEADERS -> "*",
+      ACCESS_CONTROL_ALLOW_METHODS -> "*"
+    )
   }
 
 }
