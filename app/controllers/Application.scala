@@ -1,8 +1,8 @@
 package controllers
 
 import javax.inject.Inject
-
 import akka.util.ByteString
+import play.api.Configuration
 import play.api.libs.Codecs
 import play.api.mvc._
 
@@ -11,16 +11,20 @@ import play.api.libs.ws.WSClient
 import play.api.cache.CacheApi
 import play.api.http.HeaderNames
 
-class Application @Inject() (wsClient: WSClient, cache: CacheApi) (implicit ec: ExecutionContext) extends Controller {
+class Application @Inject() (wsClient: WSClient, cache: CacheApi, config: Configuration) (implicit ec: ExecutionContext) extends Controller {
+
+  val accessControlAllowOrigin = config.getString("access.control.allow.origin").get
+  val accessControlAllowHeaders = config.getString("access.control.allow.headers").get
+  val accessControlAllowMethods = config.getString("access.control.allow.methods").get
 
   // Adds the CORS Header
   object CorsAction extends ActionBuilder[Request] {
     override def invokeBlock[A](request: Request[A], block: Request[A] => Future[Result]): Future[Result] = {
       block(request).map { result =>
         result.withHeaders(
-          ACCESS_CONTROL_ALLOW_ORIGIN -> "*",
-          ACCESS_CONTROL_ALLOW_HEADERS -> "*",
-          ACCESS_CONTROL_ALLOW_METHODS -> "*"
+          ACCESS_CONTROL_ALLOW_ORIGIN -> accessControlAllowOrigin,
+          ACCESS_CONTROL_ALLOW_HEADERS -> accessControlAllowHeaders,
+          ACCESS_CONTROL_ALLOW_METHODS -> accessControlAllowMethods
         )
       }
     }
@@ -107,8 +111,9 @@ class Application @Inject() (wsClient: WSClient, cache: CacheApi) (implicit ec: 
 
   def options(path: String) = CorsAction {
     Ok.withHeaders(
-      ACCESS_CONTROL_ALLOW_HEADERS -> "*",
-      ACCESS_CONTROL_ALLOW_METHODS -> "*"
+      ACCESS_CONTROL_ALLOW_ORIGIN -> accessControlAllowOrigin,
+      ACCESS_CONTROL_ALLOW_HEADERS -> accessControlAllowHeaders,
+      ACCESS_CONTROL_ALLOW_METHODS -> accessControlAllowMethods
     )
   }
 
